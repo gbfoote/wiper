@@ -4,6 +4,7 @@ import rclpy, time
 from rclpy.node import Node
 import RPi.GPIO as GPIO
 from std_msgs.msg import Bool, String
+from rcl_interfaces import ParameterValue
 
 class IO(Node):
 
@@ -11,7 +12,7 @@ class IO(Node):
     switches = {'on': 1, 'wash': 2, 'up': 3, 'down': 4}
     relay = {'wiper': 5, 'washer': 6}
     sample_period = 1 # seconds
-    bounce_time = 0.25 # seconds
+    bounce_time = 150 # milliseconds
 
     def __init__(self):
         super().__init__('io')
@@ -20,54 +21,55 @@ class IO(Node):
         GPIO.setup(IO.relay.values(), GPIO.OUT, GPIO.LOW) -> output pins
         self.on = False
         self.wash = False
-        self.on_publisher = self.create_publisher(Bool,'on',5)
-        self.wash_publisher = self.create_publisher(Bool,'wash',5)
-        self.up_publisher = self.create_publisher(Bool,'up',5)
-        self.down_publisher = self.create_publisher(Bool,'down',5)
-        self.msg = Bool()
+        #self.on_publisher = self.create_publisher(Bool,'on',5)
+        #self.wash_publisher = self.create_publisher(Bool,'wash',5)
+        #self.up_publisher = self.create_publisher(Bool,'up',5)
+        #self.down_publisher = self.create_publisher(Bool,'down',5)
+        self.switch_publisher = self.create_publisher(ParameterValue, switches, 10)
+        self.msg = ParameterValue
         self.wiper_subscriber = self.create_subscription(Bool, 'wiper', self.wiper_callback, 5)
         self.washer_subscriber = self.create_subscription(Bool, 'washer', self.washer_callback, 5)
 
         sample_period = 1 -> seconds
         bounce_time = 0.25 -> seconds
         self.create_timer(sample_period, self.timer_callback)
-        GPIO.add_event_detect(IO.switches['up'], GDPIO.FALLING, callback = up_callback)
-        GPIO.add_event_detect(IO.switches['down'], GDPIO.FALLING, callback = down_callback)
-        GPIO.add_event_detect(IO.switches['on'], GDPIO.FALLING, callback = on_callback)
-        GPIO.add_event_detect(IO.switches['wash'], GDPIO.FALLING, callback = wash_callback)
+        GPIO.add_event_detect(IO.switches['up'], GDPIO.FALLING, callback = up_callback, bouncetime = IO.bouncd_time)
+        GPIO.add_event_detect(IO.switches['down'], GDPIO.FALLING, callback = down_callback, bouncetime = IO.bouncd_time)
+        GPIO.add_event_detect(IO.switches['on'], GDPIO.FALLING, callback = on_callback, bouncetime = IO.bouncd_time)
+        GPIO.add_event_detect(IO.switches['wash'], GDPIO.FALLING, callback = wash_callback, bouncetime = IO.bouncd_time)
 
 
     def up_callback(self):
-        self.msg.data = True
-        self.up_publisher.publish(self.msg)
-        timer.sleep(IO.bounce_time)
-        GPIO.add_event_detect(IO.switches['up'], GDPIO.FALLING, callback = up_callback)
+        self.msg.bool_value = True
+        self.msg.string_value = 'up'
+        self.switch_publisher.publish(self.msg)
+        GPIO.add_event_detect(IO.switches['up'], GDPIO.FALLING, callback = up_callback, bouncetime = IO.bouncd_time )
 
     def down_callback(self):
-        self.msg.data = True
-        self.down_publisher.publish(self.msg)
-        timer.sleep(IO.bounce_time)
-        GPIO.add_event_detect(IO.switches['down'], GDPIO.FALLING, callback = down_callback)
+        self.msg.bool_value = True
+        self.msg.string_value = 'down'
+        self.switch_publisher.publish(self.msg)
+        GPIO.add_event_detect(IO.switches['down'], GDPIO.FALLING, callback = down_callback, bouncetime = IO.bouncd_time)
 
     def wash_callback(self):
         self.wash = !self.wash
         self.msg.data = self.wash
-        self.wash_publish.publish(self.msg)
-        timer.sleep(IO.bounce_time)
+        self.switch_publisher.publish(self.msg)
         if self.wash:
-            GPIO.add_event_detect(IO.switches['wash'], GDPIO.RISING, callback = wash_callback)
+            GPIO.add_event_detect(IO.switches['wash'], GDPIO.RISING, callback = wash_callback, bouncetime = IO.bouncd_time)
         else:
-            GPIO.add_event_detect(IO.switches['wash'], GDPIO.FALLING, callback = wash_callback)
+            GPIO.add_event_detect(IO.switches['wash'], GDPIO.FALLING, callback = wash_callback, bouncetime = IO.bouncd_time)
 
     def on_callback(self):
         self.on = !self.on
         self.msg = self.on
-        self.on_publish.publish(self.msg)
-        timer.sleep(IO.bounce_time)
+        self.switch_publisher.publish(self.msg)
         if self.on:
-            GPIO.add_event_detect(IO.switches['on'], GDPIO.RISING, callback = on_callback)
+            GPIO.add_event_detect(IO.switches['on'], GDPIO.RISING,
+                callback = on_callback, bouncetime = IO.bouncd_time)
         else:
-            GPIO.add_event_detect(IO.switches['on'], GDPIO.FALLING, callback = on_callback)
+            GPIO.add_event_detect(IO.switches['on'], GDPIO.FALLING,
+                callback = on_callback, bouncetime = IO.bouncd_time)
 
     def wiper_callback(self, msg):
         GPIO.output(IO.relay['wiper'], msg.data)
@@ -85,92 +87,70 @@ class State(Node):
         self.state = 'off'
         self.on = False
         self.wash = False
-        self.wipe_period = self.initial_period
+        self.wipe_period = State.initial_period
         self.period_increment = 1.5
-        self.on_subscription = self.create_subscription(Bool, 'on', self.on_callback, 5)
-        self.wash_subscription = self.create_subscription(Bool, 'wash', self.wash_callback, 5)
-        self.up_subscription = self.create_subscription(Bool, 'up', self.up_callback, 5)
-        self.down_subscription = self.create_subscription(Bool, 'down', self.down_callback, 5)
-        self.state_publisher = self.create_publisher(String, 'state', 5)
-        self.delay_period_publisher = self.create_publisher(Float32, 'delay_period', 5)
+        self.switch_subscription = self.create_subscription(
+            ParameterValue, switches, switch_callback, 10)
+        #self.on_subscription = self.create_subscription(Bool, 'on', self.on_callback, 5)
+        #self.wash_subscription = self.create_subscription(Bool, 'wash', self.wash_callback, 5)
+        #self.up_subscription = self.create_subscription(Bool, 'up', self.up_callback, 5)
+        #self.down_subscription = self.create_subscription(Bool, 'down', self.down_callback, 5)
+        self.state_publisher = self.create_publisher(ParameterValue, 'state', 10)
 
-    def self.on_callback(self, status):
-        self.switch_change('on', status.data)
+    def switch_callback(self, param):
+        switch = param.string_value
+        status = param.bool_value
 
-    def self.wash_callback(self, status):
-        self.switch_change('wash', status.data)
+        if self.state = 'off':
+            if switch == 'on' and status == True:
+                self.state = 'on'
+                pub('on')
+            elif switch == 'wash' and status == True:
+                self.state = 'wash'
+                pub('wash')
+            elif switch == 'up':
+                self.state = 'off'
+                pub('single')
 
-    def self.up_callback(self, status):
-        self.switch_change('up', status.data)
+        elif self.state = 'on':
+            if switch == 'on' and status == False:
+                self.state = 'off'
+                pub('off')
+            elif switch == 'down':
+                self.state = 'intermittent'
+                self.wipe_period = State.initial_period
+                pub('intermittent')
+                pub1(self.wipe_period)
 
-    def self.down_callback(self, status):
-        self.change_state('down', status.data)
+        elif self.state = 'wash':
+            if switch == 'wash' and status == False:
+                self.state = 'off'
+                self.pub('wash_tail')
 
-    def self.change_state(self, switch, status)
-        self.state_processor ={
-        'off': self.off_process,
-        'on': self.on_process,
-        'wash': self.wash_process,
-        'wash_tail': self.wash_tail_process,
-        'intermittent': self.intermittent_process,
-        'single': self.single_process
-        }
-        self.state_processor.get(self.state)(switch, status)
-
-    def self.off_process(self, switch, status):
-        if switch == 'on' and status == True:
-            self.state = 'on'
-            pub('on')
-        elif switch == 'wash' and status == True:
-            self.state = 'wash'
-            pub('wash')
-        elif switch == 'up':
+        elif self.state = 'wash_tail':
             self.state = 'off'
-            pub('single')
 
-    def self.on_process(self, switch, status):
-        if switch == 'on' and status == False:
+        elif self.state = 'intermittent':
+            if switch == 'on' and status == False:
+                self.state = 'off'
+                pub('off')
+            elif switch == 'up' and
+                self.wipe_period/self.period_increment > state.initial_period:
+                self.wipe_period /= self.period_increment
+                pub1(self.wipe_period)
+            elif switch == 'down':
+                self.wipe_period *= self.period_increment
+                pub1(self.wipe_period)
+
+        elif self.state = 'single':
             self.state = 'off'
-            pub('off')
-        elif switch == 'down':
-            self.state = 'intermittent'
-            self.wipe_period = State.initial_period
-            pub('intermittent')
-            pub1(self.wipe_period)
 
-    def self.wash_process(self, switch, status):
-        if switch == 'wash' and status == False:
-            self.state = 'off'
-            self.pub('wash_tail')
 
-    def self.wash_tail_process(self, switch, status):
-        self.state = 'off'
-
-    def self.intermittent_process(self, switch, status):
-        if switch == 'on' and status == False:
-            self.state = 'off'
-            pub('off')
-        elif switch == 'up' and
-            self.wipe_period/self.period_increment > state.initial_period:
-            self.wipe_period /= self.period_increment
-            pub1(self.wipe_period)
-        elif switch == 'down':
-            self.wipe_period *= self.period_increment
-            pub1(self.wipe_period)
-
-    def self.single_process(self, switch, status):
-        self.state = 'off'
-
-    def self.pub(self, state):
-        msg = String()
-        msg.data = state
+    def self.pub(self, state, period):
+        msg = ParameterValue()
+        msg.string_value = state
+        msg.double_value = period
         self.state_publisher(msg)
-
-    def self.pub1(self, period):
-        msg = Float32()
-        msg.data = period
-        self.delay_period_publisher(msg)
-
 
 class Relays(Node):
 
